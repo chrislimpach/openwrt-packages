@@ -26,6 +26,7 @@ PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(BUILD_VARIANT)/$(PKG_NAME)-$(PKG_VERSI
 include $(INCLUDE_DIR)/package.mk
 
 define Package/openssh/Default
+	VERSION:=9999cl1-$(PKG_VERSION)-$(PKG_RELEASE)
 	SECTION:=net
 	CATEGORY:=Network
 	DEPENDS:=+libopenssl +zlib

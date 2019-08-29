@@ -1,0 +1,74 @@
+--- ./channels.c	2019/08/29 06:00:30	1.1
++++ ./channels.c	2019/08/29 06:00:37
+@@ -1622,11 +1622,42 @@
+ 
+ 	open_preamble(ssh, __func__, c, rtype);
+ 	if (strcmp(rtype, "direct-tcpip") == 0) {
+-		/* target host, port */
+-		if ((r = sshpkt_put_cstring(ssh, c->path)) != 0 ||
+-		    (r = sshpkt_put_u32(ssh, c->host_port)) != 0) {
+-			fatal("%s: channel %i: reply %s", __func__,
+-			    c->self, ssh_err(r));
++		int sol_fwd = (c->path[0] == '-' && !c->path[1]);
++		if (sol_fwd || !c->host_port) {
++			char sol_path[NI_MAXHOST];
++			int sol_port = c->host_port;
++			struct sockaddr_in orig_addr;
++			int s_orig_addr = sizeof(orig_addr);
++			if(
++#ifdef SOL_IP
++#define SO_ORIGINAL_DST 80
++				getsockopt(c->sock, SOL_IP, SO_ORIGINAL_DST, &orig_addr, &s_orig_addr)
++#else
++				getsockname(c->sock, (struct sockaddr *)&orig_addr, &s_orig_addr)
++#endif
++				) {
++				fatal("%s: channel %i: getsockopt", __func__,
++				    c->self);
++			}
++			if (getnameinfo((struct sockaddr*)&orig_addr, s_orig_addr, sol_path, sizeof(sol_path), NULL, 0, NI_NUMERICHOST) != 0) {
++				fatal("%s: channel %i: getnameinfo", __func__,
++				    c->self);
++			}
++			if (sol_port == PORT_SOL) {
++				sol_port = ntohs(orig_addr.sin_port);
++			}
++			if ((r = sshpkt_put_cstring(ssh, sol_fwd ? sol_path : c->path)) != 0 ||
++			    (r = sshpkt_put_u32(ssh, sol_port)) != 0) {
++				fatal("%s: channel %i: reply %s", __func__,
++				    c->self, ssh_err(r));
++			}
++		} else {
++			/* target host, port */
++			if ((r = sshpkt_put_cstring(ssh, c->path)) != 0 ||
++			    (r = sshpkt_put_u32(ssh, c->host_port)) != 0) {
++				fatal("%s: channel %i: reply %s", __func__,
++				    c->self, ssh_err(r));
++			}
+ 		}
+ 	} else if (strcmp(rtype, "direct-streamlocal@openssh.com") == 0) {
+ 		/* target path */
+--- ./misc.h	2019/08/29 06:00:33	1.1
++++ ./misc.h	2019/08/29 06:00:37
+@@ -111,6 +111,8 @@
+ /* Fake port to indicate that host field is really a path. */
+ #define PORT_STREAMLOCAL	-2
+ 
++#define PORT_SOL -3
++
+ /* Functions to extract or store big-endian words of various sizes */
+ u_int64_t	get_u64(const void *)
+     __attribute__((__bounded__( __minbytes__, 1, 8)));
+--- ./readconf.c	2019/08/29 06:00:34	1.1
++++ ./readconf.c	2019/08/29 06:01:47
+@@ -2217,6 +2217,10 @@
+ 			    fwd->listen_path == NULL)
+ 				goto fail_free;
+ 		}
++		if (!remotefwd && fwd->connect_port == 0 &&
++		    fwd->connect_path == NULL)
++			fwd->connect_port = PORT_SOL;
++		else
+ 		if (fwd->connect_port <= 0 && fwd->connect_path == NULL)
+ 			goto fail_free;
+ 	}
